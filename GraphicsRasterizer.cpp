@@ -211,34 +211,37 @@ void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& col
     int dy = p1.y - p0.y;
     std::vector<float> ds;
 
+    const PointOnCanvas* pp0 = &p0;
+    const PointOnCanvas* pp1 = &p1;
+
     if (std::abs(dx) > std::abs(dy)) {
         // The line is horizontal-ish. Make sure it's left to right.
         if (dx < 0) {
-            auto swap = p0;
-            const_cast<PointOnCanvas&>(p0) = p1;
-            const_cast<PointOnCanvas&>(p1) = swap;
+            auto swap = pp0;
+            pp0 = pp1;
+            pp1 = swap;
         }
 
         // Compute the Y values and draw.
-        Interpolate(p0.x, p0.y, p1.x, p1.y, ds);
+        Interpolate((*pp0).x, (*pp0).y, (*pp1).x, (*pp1).y, ds);
 
-        for (int x = p0.x; x <= p1.x; x++) {
-            PutPixel(x, static_cast<int>(ds[(x - p0.x) | 0]), color);
+        for (int x = (*pp0).x; x <= (*pp1).x; x++) {
+            PutPixel(x, static_cast<int>(ds[(x - (*pp0).x)]), color);
         }
     }
     else {
         // The line is verical-ish. Make sure it's bottom to top.
         if (dy < 0) {
-            auto swap = p0;
-            const_cast<PointOnCanvas&>(p0) = p1;
-            const_cast<PointOnCanvas&>(p1) = swap;
+            auto swap = pp0;
+            pp0 = pp1;
+            pp1 = swap;
         }
 
         // Compute the X values and draw.
-        Interpolate(p0.y, p0.x, p1.y, p1.x, ds);
+        Interpolate((*pp0).y, (*pp0).x, (*pp1).y, (*pp1).x, ds);
 
-        for (int y = p0.y; y <= p1.y; y++) {
-            PutPixel(static_cast<int>(ds[(y - p0.y) | 0]), y, color);
+        for (int y = (*pp0).y; y <= (*pp1).y; y++) {
+            PutPixel(static_cast<int>(ds[(y - (*pp0).y)]), y, color);
         }
     }
 }
@@ -251,21 +254,25 @@ void DrawWireframeTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, con
 
 
 void DrawFilledTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const PointOnCanvas& p2, const Color& color) {
+    const PointOnCanvas* pp0 = &p0;
+    const PointOnCanvas* pp1 = &p1;
+    const PointOnCanvas* pp2 = &p2;
+
     // Sort the points from bottom to top.
     if (p1.y < p0.y) {
-        auto swap = p0;
-        const_cast<PointOnCanvas&>(p0) = p1;
-        const_cast<PointOnCanvas&>(p1) = swap;
+        auto swap = pp0;
+        pp0 = pp1;
+        pp1 = swap;
     }
     if (p2.y < p0.y) {
-        auto swap = p0;
-        const_cast<PointOnCanvas&>(p0) = p2;
-        const_cast<PointOnCanvas&>(p2) = swap;
+        auto swap = pp0;
+        pp0 = pp2;
+        pp2 = swap;
     }
     if (p2.y < p1.y) {
-        auto swap = p1;
-        const_cast<PointOnCanvas&>(p1) = p2;
-        const_cast<PointOnCanvas&>(p2) = swap;
+        auto swap = pp1;
+        pp1 = pp2;
+        pp2 = swap;
     }
 
     std::vector<float> x01;
@@ -273,9 +280,9 @@ void DrawFilledTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const 
     std::vector<float> x02;
 
     // Compute X coordinates of the edges.
-    Interpolate(p0.y, p0.x, p1.y, p1.x, x01);
-    Interpolate(p1.y, p1.x, p2.y, p2.x, x12);
-    Interpolate(p0.y, p0.x, p2.y, p2.x, x01);
+    Interpolate((*pp0).y, (*pp0).x, (*pp1).y, (*pp1).x, x01);
+    Interpolate((*pp1).y, (*pp1).x, (*pp2).y, (*pp2).x, x12);
+    Interpolate((*pp0).y, (*pp0).x, (*pp2).y, (*pp2).x, x02);
 
     // Merge the two short sides.
     x01.pop_back();
@@ -294,8 +301,8 @@ void DrawFilledTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const 
     }
 
     // Draw horizontal segments.
-    for (int y = p0.y; y <= p2.y; y++) {
-        for (int x = static_cast<int>((*x_left)[y - p0.y]); x <= static_cast<int>((*x_right)[y - p0.y]); x++) {
+    for (int y = (*pp0).y; y <= (*pp2).y; y++) {
+        for (int x = static_cast<int>((*x_left)[y - (*pp0).y]); x <= static_cast<int>((*x_right)[y - (*pp0).y]); x++) {
             PutPixel(x, y, color);
         }
     }
