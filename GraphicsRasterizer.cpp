@@ -25,8 +25,9 @@ enum class LightType {
 
 struct PointOnCanvas {
     int x, y;
+    float h;
 
-    PointOnCanvas(int cx, int cy) : x(cx), y(cy) {}
+    PointOnCanvas(int cx, int cy, float ch) : x(cx), y(cy), h(ch) {}
     ~PointOnCanvas() {}
 };
 
@@ -192,7 +193,8 @@ Vector3 ReflectRayDirection(const Vector3& ray, const Vector3& normal) {
 }
 
 
-void Interpolate(int i0, int d0, int i1, int d1, std::vector<float>& ds) {
+template <typename T, typename U>
+void Interpolate(T i0, U d0, T i1, U d1, std::vector<float>& ds) {
     if (i0 == i1) {
         ds.push_back(static_cast<float>(d0));
     }
@@ -253,7 +255,7 @@ void DrawWireframeTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, con
 }
 
 
-void DrawFilledTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const PointOnCanvas& p2, const Color& color) {
+void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const PointOnCanvas& p2, const Color& color) {
     const PointOnCanvas* pp0 = &p0;
     const PointOnCanvas* pp1 = &p1;
     const PointOnCanvas* pp2 = &p2;
@@ -279,31 +281,58 @@ void DrawFilledTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const 
     std::vector<float> x12;
     std::vector<float> x02;
 
+    std::vector<float> h01;
+    std::vector<float> h12;
+    std::vector<float> h02;
+
     // Compute X coordinates of the edges.
     Interpolate((*pp0).y, (*pp0).x, (*pp1).y, (*pp1).x, x01);
+    Interpolate((*pp0).y, (*pp0).h, (*pp1).y, (*pp1).h, h01);
+
     Interpolate((*pp1).y, (*pp1).x, (*pp2).y, (*pp2).x, x12);
+    Interpolate((*pp1).y, (*pp1).h, (*pp2).y, (*pp2).h, h12);
+
     Interpolate((*pp0).y, (*pp0).x, (*pp2).y, (*pp2).x, x02);
+    Interpolate((*pp0).y, (*pp0).h, (*pp2).y, (*pp2).h, h02);
 
     // Merge the two short sides.
     x01.pop_back();
     x01.insert(x01.end(), x12.begin(), x12.end());
 
+    h01.pop_back();
+    h01.insert(h01.end(), h12.begin(), h12.end());
+
     // Determine which is left and which is right.
     std::vector<float> *x_left, *x_right;
+    std::vector<float>* h_left, * h_right;
     int m = (x02.size() / 2);
     if (x02[m] < x01[m]) {
         x_left = &x02;
         x_right = &x01;
+
+        h_left = &h02;
+        h_right = &h01;
     }
     else {
         x_left = &x01;
         x_right = &x02;
+
+        h_left = &h01;
+        h_right = &h02;
     }
 
     // Draw horizontal segments.
     for (int y = (*pp0).y; y <= (*pp2).y; y++) {
-        for (int x = static_cast<int>((*x_left)[y - (*pp0).y]); x <= static_cast<int>((*x_right)[y - (*pp0).y]); x++) {
-            PutPixel(x, y, color);
+
+        int xl = static_cast<int>((*x_left)[y - (*pp0).y]);
+        int xr = static_cast<int>((*x_right)[y - (*pp0).y]);
+
+        std::vector<float> h_segment;
+
+        Interpolate(xl, (*h_left)[y - (*pp0).y], xr, (*h_right)[y - (*pp0).y], h_segment);
+
+        for (int x = xl; x <= xr; x++) {
+            PutPixel(x, y, Multiply(h_segment[x - xl], color));
         }
     }
 }
@@ -370,18 +399,12 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 
     auto start = std::chrono::high_resolution_clock::now(); // Start the timer
 
-    /*DrawLine(PointOnCanvas(-200, -100), PointOnCanvas(240, 120), Color(0, 0, 0));
-    DrawLine(PointOnCanvas(-50, -200), PointOnCanvas(60, 240), Color(0, 0, 0));
-    DrawLine(PointOnCanvas(-50, -100), PointOnCanvas(-50, 100), Color(0, 0, 0));
-    DrawLine(PointOnCanvas(-50, -50), PointOnCanvas(60, 60), Color(0, 0, 0));
-    DrawLine(PointOnCanvas(-150, 100), PointOnCanvas(150, 100), Color(0, 0, 0));*/
+    auto p0 = PointOnCanvas(-200, -250, 0.3);
+    auto p1 = PointOnCanvas(200, 50, 0.1);
+    auto p2 = PointOnCanvas(20, 250, 1.);
 
-    auto p0 = PointOnCanvas(-200, -250);
-    auto p1 = PointOnCanvas(200, 50);
-    auto p2 = PointOnCanvas(20, 250);
-
-    DrawFilledTriangle(p0, p1, p2, Color(0, 255, 0));
-    DrawWireframeTriangle(p0, p1, p2, Color(0, 0, 0));
+    DrawTriangle(p0, p1, p2, Color(0, 255, 0));
+    //DrawWireframeTriangle(p0, p1, p2, Color(0, 0, 0));
 
     /*// Create threads to render sections of the canvas
     for (unsigned int i = 0; i < num_threads; ++i) {
