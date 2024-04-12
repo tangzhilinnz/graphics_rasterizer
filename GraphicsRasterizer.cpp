@@ -1,3 +1,4 @@
+#include <windows.h>
 #include <vector>
 #include <array>
 #include <cmath>
@@ -5,14 +6,15 @@
 #include <algorithm>
 #include <chrono>
 #include <string>
+#include <cstring>
 #include <thread>
-#include <windows.h>
 
 using namespace std::chrono_literals;
 
 
-const int CANVAS_WIDTH = 600;
-const int CANVAS_HEIGHT = 600;
+constexpr int CANVAS_WIDTH = 600;
+constexpr int CANVAS_HEIGHT = 600;
+constexpr int MAX_LINE_LENGTH = max(CANVAS_WIDTH, CANVAS_HEIGHT) + 50;
 const int RECURSION_DEPTH = 3; // 0, 1, 2, 3, 5
 std::vector<DWORD> canvasBuffer;
 const float EPSILON = 0.001f;
@@ -192,26 +194,66 @@ Vector3 ReflectRayDirection(const Vector3& ray, const Vector3& normal) {
     return Subtract(Multiply(2 * DotProduct(ray, normal), normal), ray);
 }
 
+struct InterpolateCache {
+    float cache_[MAX_LINE_LENGTH] = {};
+    size_t count_ = 0;
+
+    void UpdateCache(float value) {
+        if (count_ >= MAX_LINE_LENGTH)
+            return;
+
+        cache_[count_] = value;
+        count_++;
+    }
+
+    float Get(size_t index) {
+        return cache_[index];
+    }
+
+    void Reset() {
+        count_ = 0;
+    }
+
+    void PopBack() {
+        count_--;
+    }
+
+    size_t Size() {
+        return count_;
+    }
+
+    void AddToTail(const InterpolateCache& tailCache) {
+        if (count_ + tailCache.count_ >= MAX_LINE_LENGTH)
+            return;
+
+        memcpy(&cache_[count_], tailCache.cache_, tailCache.count_ * sizeof(float));
+        count_ += tailCache.count_;
+    }
+};
 
 template <typename T, typename U>
-void Interpolate(T i0, U d0, T i1, U d1, std::vector<float>& ds) {
+void Interpolate(T i0, U d0, T i1, U d1, InterpolateCache& ds) {
     if (i0 == i1) {
-        ds.push_back(static_cast<float>(d0));
+        ds.UpdateCache(static_cast<float>(d0));
     }
 
     float a = static_cast<float>(d1 - d0) / (i1 - i0);
     float d = static_cast<float>(d0);
 
+    //ds.Reset();
+
     for (int i = i0; i <= i1; i++) {
-        ds.push_back(d);
+        ds.UpdateCache(d);
         d += a;
     }
 }
 
-void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& color) {
+void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& color,
+              InterpolateCache* cache) {
     int dx = p1.x - p0.x;
     int dy = p1.y - p0.y;
-    std::vector<float> ds;
+    //std::vector<float> ds;
+    InterpolateCache& ds = *cache;
 
     const PointOnCanvas* pp0 = &p0;
     const PointOnCanvas* pp1 = &p1;
@@ -228,7 +270,7 @@ void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& col
         Interpolate((*pp0).x, (*pp0).y, (*pp1).x, (*pp1).y, ds);
 
         for (int x = (*pp0).x; x <= (*pp1).x; x++) {
-            PutPixel(x, static_cast<int>(ds[(x - (*pp0).x)]), color);
+            PutPixel(x, static_cast<int>(ds.Get(x - (*pp0).x)), color);
         }
     }
     else {
@@ -243,19 +285,25 @@ void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& col
         Interpolate((*pp0).y, (*pp0).x, (*pp1).y, (*pp1).x, ds);
 
         for (int y = (*pp0).y; y <= (*pp1).y; y++) {
-            PutPixel(static_cast<int>(ds[(y - (*pp0).y)]), y, color);
+            PutPixel(static_cast<int>(ds.Get(y - (*pp0).y)), y, color);
         }
     }
+
+    ds.Reset();
 }
 
-void DrawWireframeTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const PointOnCanvas& p2, const Color& color) {
-    DrawLine(p0, p1, color);
-    DrawLine(p1, p2, color);
-    DrawLine(p0, p2, color);
+void DrawWireframeTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
+                           const PointOnCanvas& p2, const Color& color, 
+                           InterpolateCache* cache) {
+    DrawLine(p0, p1, color, cache);
+    DrawLine(p1, p2, color, cache);
+    DrawLine(p0, p2, color, cache);
 }
 
 
-void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const PointOnCanvas& p2, const Color& color) {
+void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
+                  const PointOnCanvas& p2, const Color& color,
+                  InterpolateCache* cache) {
     const PointOnCanvas* pp0 = &p0;
     const PointOnCanvas* pp1 = &p1;
     const PointOnCanvas* pp2 = &p2;
@@ -277,64 +325,60 @@ void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1, const PointO
         pp2 = swap;
     }
 
-    std::vector<float> x01;
-    std::vector<float> x12;
-    std::vector<float> x02;
-
-    std::vector<float> h01;
-    std::vector<float> h12;
-    std::vector<float> h02;
+    InterpolateCache& x012 = cache[0];
+    InterpolateCache& x02 = cache[1];
+    InterpolateCache& h012 = cache[2];
+    InterpolateCache& h02 = cache[3];
 
     // Compute X coordinates of the edges.
-    Interpolate((*pp0).y, (*pp0).x, (*pp1).y, (*pp1).x, x01);
-    Interpolate((*pp0).y, (*pp0).h, (*pp1).y, (*pp1).h, h01);
-
-    Interpolate((*pp1).y, (*pp1).x, (*pp2).y, (*pp2).x, x12);
-    Interpolate((*pp1).y, (*pp1).h, (*pp2).y, (*pp2).h, h12);
+    Interpolate((*pp0).y, (*pp0).x, (*pp1).y, (*pp1).x, x012);
+    Interpolate((*pp0).y, (*pp0).h, (*pp1).y, (*pp1).h, h012);
+    x012.PopBack();
+    h012.PopBack();
+    Interpolate((*pp1).y, (*pp1).x, (*pp2).y, (*pp2).x, x012);
+    Interpolate((*pp1).y, (*pp1).h, (*pp2).y, (*pp2).h, h012);
 
     Interpolate((*pp0).y, (*pp0).x, (*pp2).y, (*pp2).x, x02);
     Interpolate((*pp0).y, (*pp0).h, (*pp2).y, (*pp2).h, h02);
 
-    // Merge the two short sides.
-    x01.pop_back();
-    x01.insert(x01.end(), x12.begin(), x12.end());
-
-    h01.pop_back();
-    h01.insert(h01.end(), h12.begin(), h12.end());
-
     // Determine which is left and which is right.
-    std::vector<float> *x_left, *x_right;
-    std::vector<float>* h_left, * h_right;
-    int m = (x02.size() / 2);
-    if (x02[m] < x01[m]) {
+    InterpolateCache *x_left, *x_right;
+    InterpolateCache * h_left, * h_right;
+    int m = (x02.Size() / 2);
+    if (x02.Get(m) < x012.Get(m)) {
         x_left = &x02;
-        x_right = &x01;
+        x_right = &x012;
 
         h_left = &h02;
-        h_right = &h01;
+        h_right = &h012;
     }
     else {
-        x_left = &x01;
+        x_left = &x012;
         x_right = &x02;
 
-        h_left = &h01;
+        h_left = &h012;
         h_right = &h02;
     }
 
     // Draw horizontal segments.
     for (int y = (*pp0).y; y <= (*pp2).y; y++) {
+        int xl = static_cast<int>((*x_left).Get(y - (*pp0).y));
+        int xr = static_cast<int>((*x_right).Get(y - (*pp0).y));
 
-        int xl = static_cast<int>((*x_left)[y - (*pp0).y]);
-        int xr = static_cast<int>((*x_right)[y - (*pp0).y]);
+        InterpolateCache& h_segment = cache[4];
 
-        std::vector<float> h_segment;
+        Interpolate(xl, (*h_left).Get(y - (*pp0).y), xr, (*h_right).Get(y - (*pp0).y), h_segment);
 
-        Interpolate(xl, (*h_left)[y - (*pp0).y], xr, (*h_right)[y - (*pp0).y], h_segment);
+        for (int x = xl; x <= xr; x++)
+            PutPixel(x, y, Multiply(h_segment.Get(x - xl), color));
 
-        for (int x = xl; x <= xr; x++) {
-            PutPixel(x, y, Multiply(h_segment[x - xl], color));
-        }
+        h_segment.Reset();
     }
+
+    x012.Reset();
+    x02.Reset();
+    h012.Reset();
+    h02.Reset();
 }
 
 
@@ -399,12 +443,14 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
 
     auto start = std::chrono::high_resolution_clock::now(); // Start the timer
 
-    auto p0 = PointOnCanvas(-200, -250, 0.3);
-    auto p1 = PointOnCanvas(200, 50, 0.1);
-    auto p2 = PointOnCanvas(20, 250, 1.);
+    auto p0 = PointOnCanvas(-200, -250, 0.3f);
+    auto p1 = PointOnCanvas(200, 50, 0.1f);
+    auto p2 = PointOnCanvas(20, 250, 1.f);
 
-    DrawTriangle(p0, p1, p2, Color(0, 255, 0));
-    //DrawWireframeTriangle(p0, p1, p2, Color(0, 0, 0));
+    std::vector<InterpolateCache> caches(5);
+
+    DrawTriangle(p0, p1, p2, Color(0, 255, 0), caches.data());
+    DrawWireframeTriangle(p0, p1, p2, Color(0, 0, 255), caches.data());
 
     /*// Create threads to render sections of the canvas
     for (unsigned int i = 0; i < num_threads; ++i) {
