@@ -1,3 +1,4 @@
+
 #include <windows.h>
 #include <vector>
 #include <array>
@@ -8,6 +9,7 @@
 #include <string>
 #include <cstring>
 #include <thread>
+#include <type_traits>
 
 using namespace std::chrono_literals;
 
@@ -19,6 +21,10 @@ const int RECURSION_DEPTH = 3; // 0, 1, 2, 3, 5
 std::vector<DWORD> canvasBuffer;
 const float EPSILON = 0.001f;
 
+// Scene setup.
+constexpr int VIEWPORT_SIZE = 1;
+constexpr int PROJECTION_PLANE_Z = 1;
+
 enum class LightType {
     AMBIENT = 0,
     POINT = 1,
@@ -29,12 +35,21 @@ struct PointOnCanvas {
     int x, y;
     float h;
 
-    PointOnCanvas(int cx, int cy, float ch) : x(cx), y(cy), h(ch) {}
+    PointOnCanvas(int cx, int cy, float ch = 1.f) : x(cx), y(cy), h(ch) {}
     ~PointOnCanvas() {}
 };
 
 struct Vector3 {
     float x, y, z;
+
+    template<typename T, typename U, typename V,
+             std::enable_if_t<std::is_convertible<T, float>::value &&
+                              std::is_convertible<U, float>::value &&
+                              std::is_convertible<V, float>::value, bool> = true>
+    Vector3(T cx, U cy, V cz):
+        x(static_cast<float>(cx)),
+        y(static_cast<float>(cy)),
+        z(static_cast<float>(cz)) {}
 };
 
 struct Matrix3 {
@@ -249,7 +264,7 @@ void Interpolate(T i0, U d0, T i1, U d1, InterpolateCache& ds) {
 }
 
 void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& color,
-              InterpolateCache* cache) {
+    InterpolateCache* cache) {
     int dx = p1.x - p0.x;
     int dy = p1.y - p0.y;
     //std::vector<float> ds;
@@ -293,8 +308,8 @@ void DrawLine(const PointOnCanvas& p0, const PointOnCanvas& p1, const Color& col
 }
 
 void DrawWireframeTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
-                           const PointOnCanvas& p2, const Color& color, 
-                           InterpolateCache* cache) {
+    const PointOnCanvas& p2, const Color& color,
+    InterpolateCache* cache) {
     DrawLine(p0, p1, color, cache);
     DrawLine(p1, p2, color, cache);
     DrawLine(p0, p2, color, cache);
@@ -302,8 +317,8 @@ void DrawWireframeTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
 
 
 void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
-                  const PointOnCanvas& p2, const Color& color,
-                  InterpolateCache* cache) {
+    const PointOnCanvas& p2, const Color& color,
+    InterpolateCache* cache) {
     const PointOnCanvas* pp0 = &p0;
     const PointOnCanvas* pp1 = &p1;
     const PointOnCanvas* pp2 = &p2;
@@ -342,8 +357,8 @@ void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
     Interpolate((*pp0).y, (*pp0).h, (*pp2).y, (*pp2).h, h02);
 
     // Determine which is left and which is right.
-    InterpolateCache *x_left, *x_right;
-    InterpolateCache * h_left, * h_right;
+    InterpolateCache* x_left, * x_right;
+    InterpolateCache* h_left, * h_right;
     int m = (x02.Size() / 2);
     if (x02.Get(m) < x012.Get(m)) {
         x_left = &x02;
@@ -379,6 +394,18 @@ void DrawTriangle(const PointOnCanvas& p0, const PointOnCanvas& p1,
     x02.Reset();
     h012.Reset();
     h02.Reset();
+}
+
+
+// Converts 2D viewport coordinates to 2D canvas coordinates.
+PointOnCanvas ViewportToCanvas(float x, float y) {
+    return PointOnCanvas(static_cast<int>(x * CANVAS_WIDTH / VIEWPORT_SIZE),
+                         static_cast<int>(y * CANVAS_HEIGHT / VIEWPORT_SIZE));
+}
+
+PointOnCanvas ProjectVector3(const Vector3& v) {
+    return ViewportToCanvas(v.x * PROJECTION_PLANE_Z / v.z,
+                            v.y * PROJECTION_PLANE_Z / v.z);
 }
 
 
@@ -448,9 +475,37 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance,
     auto p2 = PointOnCanvas(20, 250, 1.f);
 
     std::vector<InterpolateCache> caches(5);
+    //DrawTriangle(p0, p1, p2, Color(0, 255, 0), caches.data());
+    //DrawWireframeTriangle(p0, p1, p2, Color(0, 0, 255), caches.data());
 
-    DrawTriangle(p0, p1, p2, Color(0, 255, 0), caches.data());
-    DrawWireframeTriangle(p0, p1, p2, Color(0, 0, 255), caches.data());
+    auto vA = Vector3(-2.f, -0.5f, 5.f);
+    auto vB = Vector3(-2.f, 0.5f, 5.f);
+    auto vC = Vector3(-1.f, 0.5f, 5.f);
+    auto vD = Vector3(-1.f, -0.5f, 5.f);
+
+    auto vAb = Vector3(-2.f, -0.5f, 6.f);
+    auto vBb = Vector3(-2.f, 0.5f, 6.f);
+    auto vCb = Vector3(-1.f, 0.5f, 6.f);
+    auto vDb = Vector3(-1.f, -0.5f, 6.f);
+
+    auto BLUE = Color(255, 0, 0);
+    auto GREEN = Color(0, 255, 0);
+    auto RED = Color(0, 0, 255);
+
+    DrawLine(ProjectVector3(vA), ProjectVector3(vB), BLUE, caches.data());
+    DrawLine(ProjectVector3(vB), ProjectVector3(vC), BLUE, caches.data());
+    DrawLine(ProjectVector3(vC), ProjectVector3(vD), BLUE, caches.data());
+    DrawLine(ProjectVector3(vD), ProjectVector3(vA), BLUE, caches.data());
+
+    DrawLine(ProjectVector3(vAb), ProjectVector3(vBb), RED, caches.data());
+    DrawLine(ProjectVector3(vBb), ProjectVector3(vCb), RED, caches.data());
+    DrawLine(ProjectVector3(vCb), ProjectVector3(vDb), RED, caches.data());
+    DrawLine(ProjectVector3(vDb), ProjectVector3(vAb), RED, caches.data());
+
+    DrawLine(ProjectVector3(vA), ProjectVector3(vAb), GREEN, caches.data());
+    DrawLine(ProjectVector3(vB), ProjectVector3(vBb), GREEN, caches.data());
+    DrawLine(ProjectVector3(vC), ProjectVector3(vCb), GREEN, caches.data());
+    DrawLine(ProjectVector3(vD), ProjectVector3(vDb), GREEN, caches.data());
 
     /*// Create threads to render sections of the canvas
     for (unsigned int i = 0; i < num_threads; ++i) {
